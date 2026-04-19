@@ -277,9 +277,24 @@ class RealDebridResolver(ResolveUrl):
             self.reset_authorization()
             raise ResolverError('Unable to Refresh Real Debrid Token')
 
+    def _rd_request(self, url, post_data=None):
+        import urllib.request as _ur, urllib.parse as _up, ssl as _ssl, gzip as _gzip
+        _ctx = _ssl.create_default_context()
+        _opener = _ur.build_opener(_ur.HTTPSHandler(context=_ctx))
+        if post_data is not None:
+            _body = _up.urlencode(post_data).encode('utf-8')
+            _req = _ur.Request(url, data=_body, headers={'User-Agent': USER_AGENT})
+        else:
+            _req = _ur.Request(url, headers={'User-Agent': USER_AGENT})
+        _resp = _opener.open(_req, timeout=30)
+        _data = _resp.read()
+        if _resp.headers.get('content-encoding', '').lower() == 'gzip':
+            _data = _gzip.decompress(_data)
+        return json.loads(_data.decode('utf-8'))
+
     def authorize_resolver(self):
         url = '%s/%s?client_id=%s&new_credentials=yes' % (oauth_base_url, device_endpoint_path, CLIENT_ID)
-        js_result = json.loads(self.net.http_GET(url, headers=self.headers).content)
+        js_result = self._rd_request(url)
         line1 = '{0}: {1}'.format(i18n('goto_url'), js_result['verification_url'])
         line2 = '{0}: {1}'.format(i18n('enter_prompt'), js_result['user_code'])
         with common.kodi.CountdownDialog(
@@ -300,7 +315,7 @@ class RealDebridResolver(ResolveUrl):
             self.set_setting('client_id', client_id)
             self.set_setting('client_secret', client_secret)
             logger.log_debug('Authorizing Real Debrid: %s' % client_id)
-            js_result = json.loads(self.net.http_POST(url, data, headers=self.headers).content)
+            js_result = self._rd_request(url, post_data=data)
             logger.log_debug('Authorizing Real Debrid Result: |%s|' % js_result)
             self.set_setting('token', js_result['access_token'])
             self.set_setting('refresh', js_result['refresh_token'])
@@ -312,7 +327,7 @@ class RealDebridResolver(ResolveUrl):
     def __check_auth(self, device_code):
         try:
             url = '%s/%s?client_id=%s&code=%s' % (oauth_base_url, credentials_endpoint_path, CLIENT_ID, device_code)
-            js_result = json.loads(self.net.http_GET(url, headers=self.headers).content)
+            js_result = self._rd_request(url)
         except Exception as e:
             logger.log_debug('Exception during RD auth: %s' % e)
         else:
